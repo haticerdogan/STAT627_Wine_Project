@@ -1,0 +1,319 @@
+---
+title: "Exploratory Data Analysis"
+author: "Patrick Marino, Stephen DeFerarri, Hatice Erdogan, Kavita Kalsy"
+date: "2024-06-07"
+output:
+  word_document: default
+  pdf_document: default
+---
+
+```{r}
+library(tidyr)
+library(GGally)
+library(tidyverse)
+library(dplyr)
+```
+
+
+```{r}
+# Red_wine<- read.csv("C:\\Users\\pjm11\\OneDrive\\Documents\\Machine learning\\wine+quality\\winequality-red.csv")
+Red_wine<- read.csv("wine+quality/winequality-red.csv")
+#View(Red_wine)
+str(Red_wine)
+```
+
+```{r}
+library(tidyr)
+
+
+separated_data <- separate(Red_wine, col = "fixed.acidity.volatile.acidity.citric.acid.residual.sugar.chlorides.free.sulfur.dioxide.total.sulfur.dioxide.density.pH.sulphates.alcohol.quality",
+                           into = c("fixed.acidity", "volatile.acidity", "citric.acid", "residual.sugar", "chlorides", "free.sulfur.dioxide", "total.sulfur.dioxide", "density", "pH", "sulphates", "alcohol", "quality"),
+                           sep = ";")
+
+Red.wine<- separated_data
+```
+
+```{r}
+Red.wine <- Red.wine %>%
+  mutate(Color = "Red")
+```
+
+```{r}
+# White_wine<- read.csv("C:\\Users\\pjm11\\OneDrive\\Documents\\Machine learning\\wine+quality\\winequality-white.csv")
+White_wine<- read.csv("wine+quality/winequality-white.csv")
+
+White.wine <- separate(White_wine, col = "fixed.acidity.volatile.acidity.citric.acid.residual.sugar.chlorides.free.sulfur.dioxide.total.sulfur.dioxide.density.pH.sulphates.alcohol.quality",
+                           into = c("fixed.acidity", "volatile.acidity", "citric.acid", "residual.sugar", "chlorides", "free.sulfur.dioxide", "total.sulfur.dioxide", "density", "pH", "sulphates", "alcohol", "quality"),
+                           sep = ";")
+
+White.wine<- White.wine %>%
+  mutate(Color = "White")
+```
+
+
+Join
+```{r}
+Wine_joined<- full_join(White.wine, Red.wine, by = intersect(names(White.wine), names(Red.wine)))
+```
+
+
+```{r}
+Wine_joined <- Wine_joined %>%
+  mutate_at(vars(-Color), as.numeric)
+```
+
+Summary of data
+```{r}
+summary(Wine_joined)
+```
+
+
+summary of "quality"
+```{r}
+summary(Wine_joined$quality)
+```
+
+
+Our response variable is going to be "Quality" this is a variable that measures the quality of the wine. It is currently on a 1-10 scale with 10 being the highest quality. We plan on turning it into an ordinal categorical variable. Based on the frequencies of the levels of the variable, we will determine cutoffs for 4 distinct quality levels: bellow average, average, good, great. 
+
+```{r}
+quality_table<- table(Wine_joined$quality)
+
+quality_table
+ggplot(Wine_joined, aes(x = quality)) +
+  geom_histogram()
+```
+
+Based on the histogram and frequency table, we see that quality scores 5 and 6 are the most common amongst the data, we will rank those as average. 3-4 are the lowest scores recorded and will be categorized as poor. 7 will be categorized as good, and 8-9 will be categorized as great. 
+
+```{r}
+Wine_joined <- Wine_joined %>%
+  mutate(quality = case_when(
+    quality %in% 3:4 ~ "Poor",
+    quality %in% 5:6 ~ "Average",
+    quality == 7 ~ "Good",
+    quality %in% 8:9 ~ "Great"
+  ))
+
+Wine_joined$quality<- factor(Wine_joined$quality, levels = c("Poor", "Average", "Good", "Great"))
+
+set.seed(123)
+Wine_training_index<- sample(1:nrow(Wine_joined), 0.6*nrow(Wine_joined))
+Wine_training<- Wine_joined[Wine_training_index, ]
+Wine_testing<- Wine_joined[-Wine_training_index, ]
+quality_table<- table(Wine_training$quality)
+
+
+quality_table
+ggplot(Wine_training, aes(x = quality)) +
+  geom_bar()
+```
+
+I now created my response variable "quality" and releveled it appropriately. 
+
+I will now look at a pairs plot to get an understanding of the information
+
+
+```{r}
+```{r}
+# Create ggpairs plot with clear correlation numbers and aesthetics
+ggpairs(Wine_training, aes(color = Color, bins = 30))
+```
+
+The pairs plot is  bit crowded, so I will look at correlation among predictors using a correlation matrix and heatmap 
+
+```{r}
+predictors<- Wine_training[, 1:11 ]
+
+correlation_matrix <- cor(predictors)
+heatmap(correlation_matrix,
+        Colv = NA, Rowv = NA,
+        col = colorRampPalette(c("blue", "white", "red"))(100),
+        scale = "none",
+        margins = c(5, 10))
+```
+Looking at the heat map, we can see strong correlation between density and residual sugar, density and fixed acidity, and total sulfur dioxide and residual sugar. I will now explore those correlations to see just how strong they are. 
+
+```{r}
+cor(Wine_training$density, Wine_training$residual.sugar)
+cor(Wine_training$density, Wine_training$fixed.acidity)
+cor(Wine_training$total.sulfur.dioxide, Wine_training$residual.sugar)
+```
+These correlations were not too strong and likely should not induce heavy multicolinearity within our models. 
+
+However, free sulfur dioxide and total sulfur dioxide likely should not be in the same model
+```{r}
+cor(Wine_training$total.sulfur.dioxide, Wine_training$free.sulfur.dioxide)
+```
+
+I will now look at some summary statistics of our variables at the levels of our predictor
+
+```{r}
+summary_stats <- function(data, numeric_var, factor_var) {
+  result <- tapply(data[[numeric_var]], data[[factor_var]], function(x) {
+    mean_val <- mean(x, na.rm = TRUE)  
+    sd_val <- sd(x, na.rm = TRUE)
+    count_val <- length(x) 
+    return(c(mean = mean_val, sd = sd_val, count = count_val))
+  })
+  
+    overall_stats <- c(
+    mean = mean(data[[numeric_var]], na.rm = TRUE),
+    sd = sd(data[[numeric_var]], na.rm = TRUE),
+    count = length(data[[numeric_var]])
+  )
+  
+  result_df <- data.frame(
+                          mean = unlist(lapply(result, "[[", "mean")),
+                          sd = unlist(lapply(result, "[[", "sd")),
+                          count = unlist(lapply(result, "[[", "count")))
+                        
+  
+  overall_row <- data.frame(mean = overall_stats["mean"], sd = overall_stats["sd"], count = overall_stats["count"])
+  row.names(overall_row) <- "Overall"
+  
+ result_df <- rbind(result_df, overall_row)
+  
+  return(result_df)
+}
+```
+
+```{r}
+summary_stats(Wine_training, "fixed.acidity", "quality")
+```
+
+```{r}
+summary_stats(Wine_training, "volatile.acidity", "quality")
+summary_stats(Wine_training, "citric.acid", "quality")
+summary_stats(Wine_training, "residual.sugar", "quality")
+summary_stats(Wine_training, "chlorides", "quality")
+summary_stats(Wine_training, "free.sulfur.dioxide", "quality")
+summary_stats(Wine_training, "total.sulfur.dioxide", "quality")
+summary_stats(Wine_training, "density", "quality")
+summary_stats(Wine_training, "pH", "quality")
+summary_stats(Wine_training, "sulphates", "quality")
+summary_stats(Wine_training, "alcohol", "quality")
+```
+
+Tables of color by quality
+
+```{r}
+quality_color_table <- table(Wine_training$quality, Wine_training$Color)
+percentage_table <- prop.table(quality_color_table, margin = 2) * 100
+percentage_table
+```
+As we can see, a higher percentage of white wine is of better quality than is red wine 
+
+I will not do a written analysis of the summary tables that I made above, but I will use all of the tables to make informed decisions of how the predictors will be incorporated into the models. 
+
+To close out I will identify our likely variables, with predictors determined through consideration of correlations and means:
+Response: Quality
+
+predictors: Color, alcohol, fixed acidity, volatile acidity, citric acid, chlorides, free sulfur, (maybe) sulphates. 
+
+### Modeling 
+
+```{r}
+# Multinomial Log-linear Model
+library(nnet)
+```
+
+```{r}
+# Multinomial Model with all the predictors
+multinom_withall <- multinom(quality ~ ., data = Wine_training)
+multinom_withall_predictions <- predict(multinom_withall, Wine_testing)
+multinom_withall_accuracy <- sum(multinom_withall_predictions == Wine_testing$quality) / nrow(Wine_testing)
+print(paste("Multinomial Log-linear Model Accuracy using all the predictors:", multinom_withall_accuracy))
+```
+
+```{r}
+summary(multinom_withall)
+```
+
+```{r}
+# Multinomial Model with reduced number of predictors (correlated predictors are not used)
+multinom_reduced <- multinom(quality ~ Color + alcohol + fixed.acidity + volatile.acidity + citric.acid + chlorides + free.sulfur.dioxide + sulphates, data = Wine_training)
+multinom_reduced_predictions <- predict(multinom_reduced, Wine_testing)
+multinom_reduced_accuracy <- sum(multinom_reduced_predictions == Wine_testing$quality) / nrow(Wine_testing)
+print(paste("Multinomial Log-linear Model Accuracy with reduced predictors:", multinom_reduced_accuracy))
+```
+
+```{r}
+summary(multinom_reduced)
+```
+
+AIC increased with the reduced model.
+
+```{r}
+# Perform step-wise selection 
+library(leaps)
+library(MASS)
+stepwise_model <- stepAIC(multinom_withall, direction = "both") 
+# Display the summary of the selected model
+summary(stepwise_model)
+```
+
+```{r}
+# Model selected from step-wise with best AIC: 4810, EXCLUDING ONLY the variable "chlorides"
+multinom_bestAIC <- multinom(quality ~ fixed.acidity + volatile.acidity + 
+    citric.acid + residual.sugar + free.sulfur.dioxide + total.sulfur.dioxide + 
+    density + pH + sulphates + alcohol + Color, data = Wine_training)
+
+multinom_bestAIC_predictions <- predict(multinom_bestAIC, Wine_testing)
+multinom_bestAIC_accuracy <- sum(multinom_bestAIC_predictions == Wine_testing$quality) / nrow(Wine_testing)
+print(paste("Multinomial Log-linear Model Accuracy with best AIC:", multinom_bestAIC_accuracy))
+```
+
+```{r}
+# KNN Model with 3 neighbors 
+set.seed(123)
+X.train <- Wine_training[, 1:11]
+Y.train <- Wine_training$quality
+
+X.test <- Wine_testing[, 1:11]
+Y.test <- Wine_testing$quality
+
+quality.knn <- class::knn(train = X.train, test = X.test, cl = Y.train, k = 3)
+
+# Confusion matrix on the testing data set
+table(Y.test, quality.knn)  
+```
+Diagonals are the true classification rate (11, 1748, 155, and 13).
+We want to minimize the numbers (to zero) on the off diagonals as much as possible.
+
+```{r}
+# Accuracy for KNN model with k = 3
+mean(Y.test == quality.knn) 
+```
+
+```{r}
+# Fine tuning the K
+set.seed(123)
+Kmax <- 25  # Set the largest K I would consider for this study. 
+# Fine tuning hyperparameter for K.
+class.rate <- rep(0, Kmax)
+for (i in 1:Kmax) {
+  knn.out <- class::knn(train = X.train, test = X.test, cl = Y.train, k = i)
+  class.rate[i] <- mean(Y.test == knn.out)
+}
+
+plot(c(1:Kmax), class.rate, xlab="K", ylab="Correct classification rate")
+```
+
+```{r}
+k.opt <- which.max(class.rate)
+c(k.opt, class.rate[which.max(class.rate)])  # Optimal K
+```
+
+We got the highest accuracy when k = 20.
+
+```{r}
+quality.knnOpt <- class::knn(train=X.train, test=X.test, cl=Y.train, k = k.opt)
+table(Y.test, quality.knnOpt)  # Confusion matrix on the testing data set.
+```
+The model fails to predict the minority classes ("Poor" and "Great") with 20 neighbors. 
+
+```{r}
+mean(Y.test == quality.knnOpt) # correct classification rate on the testing data.
+```
+
